@@ -5,23 +5,28 @@ import numpy as np
 import networkx as nx 
 
 class monte_carlo_simulations:
-    def __init__(self,graph,background_field,positive_ratio):
+    def __init__(self,graph,background_field,T_burn=500):
         self.graph = graph
         self.graph_size = len(self.graph.nodes())
         self.adj_matrix = nx.to_numpy_matrix(graph)
-        pos_no = int(positive_ratio*int(self.graph_size))
-        neg_no = int(self.graph_size) - pos_no
-        spins = np.concatenate([np.ones(pos_no),(-1)*np.ones(neg_no)])
-        np.random.shuffle(spins)
-        self.init_spins = spins
+        # pos_no = int(positive_ratio*int(self.graph_size))
+        # neg_no = int(self.graph_size) - pos_no
+        # spins = np.concatenate([np.ones(pos_no),(-1)*np.ones(neg_no)])
+        # np.random.shuffle(spins)
+        #self.init_spins = None
         self.background_field = background_field
+        self.T_burn = T_burn
         
-        
-    def monte_carlo_metropolis(self,control,beta,T,T_burn=1000):
+    def initialise_spins(self):
+        #spins = np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
+        spins =np.ones(self.graph_size)
+        return spins
+
+    def monte_carlo_metropolis(self,control,beta,T):
         total_mag_history = []
-        mag_old = self.init_spins
-        for it in range(T+T_burn):
-            spin_int = random.randint(0,len(self.init_spins)-1)
+        mag_old = self.initialise_spins()
+        for it in range(T+self.T_burn):
+            spin_int = random.randint(0,self.graph_size-1)
             surr_spin = float(self.adj_matrix[spin_int,:]@mag_old)
             delta_e = 2*mag_old[spin_int]*(surr_spin+control[spin_int])
             if delta_e > 0:
@@ -32,9 +37,9 @@ class monte_carlo_simulations:
             if random_prob <=prob:
                 mag_rev = (-1)*mag_old[spin_int]
                 mag_old[spin_int] = mag_rev
-            if it > T_burn:
-                total_mag_history.append(mag_old)
-        return np.sum(np.array(total_mag_history),axis=1)
+            if it > self.T_burn:
+                total_mag_history.append(np.sum(mag_old))
+        return total_mag_history
 
     def run_MC(self,control,T,MC,beta):
         time_averaged_mag = np.zeros(MC)

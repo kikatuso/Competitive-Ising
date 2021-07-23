@@ -17,7 +17,7 @@ from . import helperfunctions as hf
 class mf_ising_system:
 
     def __init__(self,graph,background_field,fixed_point_iter=int(5*1e4),init_mag='aligned',fp_tol_fac=10-6,
-        iim_iter=1000,step_size=1.0,iim_tol_fac=1e-5,optimiser_type='sgd'):
+        iim_iter=1000,step_size=1.0,iim_tol_fac=1e-5,optimiser_type='sgd',momentum=0.4):
         
         self.graph = graph
         self.adj_matrix = nx.to_numpy_matrix(graph)
@@ -28,9 +28,12 @@ class mf_ising_system:
         self.fp_tol_fac=fp_tol_fac
         self.iim_tol_fac=iim_tol_fac
         self.optimiser_type = optimiser_type
+        self.momentum = momentum
         self.step_size=step_size
         if init_mag=='aligned':
             self.init_mag=np.ones(self.graph_size)
+        elif init_mag=='random':
+            self.init_mag=np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
         else:
             self.init_mag = init_mag 
             
@@ -89,8 +92,7 @@ class mf_ising_system:
         return gradient
     
     def sgdm(self,grad,control_field,changes,it):
-        momentum=0.3
-        new_change = self.step_size * grad + momentum * changes[it]
+        new_change = self.step_size * grad + self.momentum * changes[it]
         control_field_update = control_field + new_change
         changes.append(new_change)
         return control_field_update,changes
@@ -140,17 +142,20 @@ class mf_ising_system:
             mag_i=mag_ii
         if it==self.iim_iter-1:
             print('Failed to converge after {} iterations'.format(self.iim_iter))
+            final_mag = mag_ii
             
         return control_field,final_mag
             
 
 class TrueSolution:
 
-    def __init__(self,graph):
+    def __init__(self,graph,init_mag='random'):
         self.adj_matrix = nx.to_numpy_matrix(graph)
         self.graph_size = len(graph.nodes.keys())
-        self.init_mag = np.ones(self.graph_size)
-
+        if init_mag =='aligned':
+            self.init_mag = np.ones(self.graph_size)
+        elif init_mag=='random':
+            self.init_mag=np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
         possible_configs = np.zeros([2**self.graph_size,self.graph_size])
         all_pos,all_neg = np.ones(self.graph_size),(-1)*np.ones(self.graph_size)
         for i,p in enumerate(self.unique_permutations(np.concatenate((all_pos,all_neg)),self.graph_size)):
@@ -211,16 +216,16 @@ class TrueSolution:
         term = torch.stack([torch.exp(-beta*self.hamiltonian(self.possible_configs[i],h)) for i in range(self.possible_configs.shape[0])])
         return torch.sum(term)
 
-    def nth_derivative(f, wrt, n):
-        for i in range(n):
-            grads = -grad(f, wrt, create_graph=True)[0]
-            f = grads.sum()
-        return grads
+    # def nth_derivative(self,f, wrt, n):
+    #     for i in range(n):
+    #         grads = -grad(f, wrt, create_graph=True)[0]
+    #         f = grads.sum()
+    #     return grads
 
 
     def magnetisation(self,h,beta):
         term = (1/beta)*self.partition_dev(h,beta)* 1.0/(self.partition_function(h,beta))
-        #term =(1/beta)*nth_derivative(partition_function(system,h,beta),h,1)* 1.0/(partition_function(system,h,beta))
+        #term =(1/beta)*self.nth_derivative(self.partition_function(h,beta),h,1)* 1.0/(self.partition_function(h,beta))
         return term
 
 
