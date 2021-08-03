@@ -56,8 +56,8 @@ def crit_b(J):
     eigenvalues,_ = np.linalg.eig(J)
     return 1./np.max(np.abs(eigenvalues))
 
-def average_degree(control):
-    return np.sum([G.degree[i]*con for i,con in enumerate(control)])
+def average_degree(system,control,budget):
+    return np.sum([system.graph.degree[i]*con for i,con in enumerate(control)])/budget
 
 
 def projection_simplex_sort_torch(v, z=1):
@@ -66,6 +66,8 @@ def projection_simplex_sort_torch(v, z=1):
     cssv = torch.cumsum(u,dim=0) - z
     ind = torch.arange(n_features) + 1
     cond = u - cssv / ind > 0
+    if all(cond==False): # condition for large numbers 
+        cond[0]=True
     rho = ind[cond][-1]
     theta = cssv[cond][-1] / float(rho)
     w = v.clone()

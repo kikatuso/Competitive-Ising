@@ -16,7 +16,7 @@ from . import helperfunctions as hf
 
 class mf_ising_system:
 
-    def __init__(self,graph,background_field,fixed_point_iter=int(5*1e4),init_mag='aligned',fp_tol_fac=10-6,
+    def __init__(self,graph,background_field,fixed_point_iter=int(5*1e4),init_mag='aligned',fp_tol_fac=1e-6,
         iim_iter=1000,step_size=1.0,iim_tol_fac=1e-5,optimiser_type='sgd',momentum=0.4):
         
         self.graph = graph
@@ -51,31 +51,27 @@ class mf_ising_system:
             m_new[i]=self.single_mag(i,m_old,beta,field)
         return m_new
 
-    def Steffensen_method(self,mag,beta,field,mag_delta_history,it):      
-        # Numerical Analysis Richard L.Burden 9th Edition, p. 107
+    def aitken_method(self,mag0,beta,field):      
+        # Numerical Analysis Richard L.Burden 9th Edition, p. 105
         
-        if len(mag_delta_history)==0:
-            mag0=mag
-        else:
-            mag0=mag_delta_history[it]
-        
+        mag1=self.magnetisation(mag0,beta,field)
         for i in range(self.fixed_point_iter):     
-            mag1=self.magnetisation(mag0,beta,field)
             mag2=self.magnetisation(mag1,beta,field)   
-
-            if np.all((mag+mag2-2*mag1)!=0):
-                mag_d = mag - (mag1-mag)**2/(mag+mag2-2*mag1) 
+            if np.all((mag0+mag2-2*mag1)!=0):
+                mag_d = mag0 - (mag1-mag0)**2/(mag0+mag2-2*mag1) 
             else:
                 mag_d = mag1
             
-            if np.abs(np.mean(mag1)-np.mean(mag_d))<self.fp_tol_fac:
+            if abs(np.sum(mag0)-np.sum(mag_d))<self.fp_tol_fac: 
                 break
+            mag0=mag1
+            mag1=mag2
             if i+1==self.fixed_point_iter:
                 print('Failed to solve self-consistency equation. Consider increasing fixed_point_iter parameter')
                 mag_d = mag1
-                        
-        mag_delta_history.append(mag_d)
-        return mag_d,mag_delta_history
+ 
+        self.mag_delta_history.append(mag_d)
+        return mag_d
     
     def mag_grad(self,beta,mag):
         # Mean Field Susceptibility;
@@ -87,7 +83,7 @@ class mf_ising_system:
             inv = np.linalg.inv(np.identity(self.graph_size)-beta*D*self.adj_matrix)
             susc_matrix = beta*inv*D
             gradient = np.sum(susc_matrix,axis=1).A1
-            gradient = (1.0 / np.linalg.norm(gradient))*gradient #Normalise
+            #gradient = (1.0 / np.linalg.norm(gradient))*gradient #Normalise
 
         return gradient
     
@@ -109,18 +105,18 @@ class mf_ising_system:
         # note: different from init_mag which denotes initial magnetisation *without* the external field      
         tot_field = np.array(self.background_field+control_field)
 
-        control_field_history=[]
-        control_field_history.append(control_field)
-        mag_delta_history=[]
+        self.control_field_history=[]
+        self.control_field_history.append(control_field)
+        self.mag_delta_history =[]
         
-        mag_i,mag_delta_history = self.Steffensen_method(self.init_mag,beta,tot_field,mag_delta_history,0)
+        mag_i= self.aitken_method(self.init_mag,beta,tot_field)
         
 
         changes = [np.zeros(self.graph_size)]
         for it in range(self.iim_iter):
             if field_budget!=0:
                 mag_i_grad = self.mag_grad(beta,mag_i)
-                control_field = control_field_history[it]
+                control_field = self.control_field_history[it]
 
                 if self.optimiser_type=='sgd':
                     control_field_update = (control_field + self.step_size*mag_i_grad)
@@ -133,12 +129,12 @@ class mf_ising_system:
                 control_field_new = np.zeros(self.graph_size)
     
             tot_field = np.array(self.background_field+control_field_new)
-            mag_ii,mag_delta_history = self.Steffensen_method(mag_i,beta,tot_field,mag_delta_history,it)
+            mag_ii= self.aitken_method(mag_i,beta,tot_field)
 
             if np.abs(np.mean(mag_ii)-np.mean(mag_i)) <= self.iim_tol_fac:
                 final_mag=mag_ii
                 break
-            control_field_history.append(control_field_new)
+            self.control_field_history.append(control_field_new)
             mag_i=mag_ii
         if it==self.iim_iter-1:
             print('Failed to converge after {} iterations'.format(self.iim_iter))
