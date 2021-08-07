@@ -1,7 +1,7 @@
 setup.py
 src/MonteCarloIsing.py
+src/SimGame.py
 src/SingleAgent.py
-src/TwoAgents.py
 src/__init__.py
 src/helperfunctions.py
 two_player_ising_influence.egg-info/PKG-INFO

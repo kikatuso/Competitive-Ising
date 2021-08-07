@@ -3,19 +3,22 @@
 
 import numpy as np 
 import torch
-
+import sys
 
 normalize=lambda x: x / np.sqrt(np.sum(x**2))
 
 def projection_simplex_sort(v, z=1):
     n_features = v.shape[0]
+    v = np.abs(v)
     u = np.sort(v)[::-1]
     cssv = np.cumsum(u) - z
     ind = np.arange(n_features) + 1
     cond = u - cssv / ind > 0
-    if all(cond==False): # condition for large numbers 
-        cond[0]=True
-    rho = ind[cond][-1]
+
+    try:
+        rho = ind[cond][-1]
+    except IndexError:
+        sys.exit()
     theta = cssv[cond][-1] / float(rho)
     w = np.maximum(v - theta, 0)
     return w
