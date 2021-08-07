@@ -17,7 +17,7 @@ spec = [
     ('fixed_point_iter',types.int32),
     ('iim_iter',types.int32),
     ('fp_tol_fac',types.float64),
-    ('optimiser_type',types.string),
+   #('optimiser_type',types.string),
     ('beta1',types.float64),
     ('beta2',types.float64),
     ('eps',types.float64)
