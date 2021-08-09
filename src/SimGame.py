@@ -3,28 +3,13 @@ import networkx as nx
 import numpy as np
 import math  
 from tqdm import tqdm
-from numba import types      # import the types
-from numba.experimental import jitclass
+
 
 
 from . import helperfunctions as hf
 
 
-spec = [
-    ('adj_matrix',types.float64[:]),
-    ('graph_size',types.int32),
-    ('background_field',types.float64[:]),
-    ('fixed_point_iter',types.int32),
-    ('iim_iter',types.int32),
-    ('fp_tol_fac',types.float64),
-   #('optimiser_type',types.string),
-    ('beta1',types.float64),
-    ('beta2',types.float64),
-    ('eps',types.float64)
-]
-
-@jitclass(spec)
-class mf_ising_system(object):
+class mf_ising_system():
 
     def __init__(self,graph,background_field,fixed_point_iter=int(5*1e4),init_mag='random',fp_tol_fac=1e-5,
                  iim_iter=5000,iim_tol_fac=1e-4,optimiser_type='adam',**kwargs):
@@ -42,8 +27,8 @@ class mf_ising_system(object):
 
         if init_mag=='random':
             self.init_mag=np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
-        # else:
-        #     self.init_mag = init_mag 
+        else:
+            self.init_mag = init_mag 
 
 
     def lr_1(self,x):
@@ -277,24 +262,28 @@ class mf_ising_system(object):
         self.grad2neg =[]   
         self.init_optimiser()
         for it in tqdm(range(self.iim_iter)) if progress else range(self.iim_iter):
-
-            control_pos,pos_gradient = self.positive_agent(mag_i,it,pos_budget,beta)
-            
-            control_neg,neg_gradient = self.negative_agent(mag_i,it,neg_budget,beta)
+            gradients =  []
+            if pos_budget!=0:
+                control_pos,pos_gradient = self.positive_agent(mag_i,it,pos_budget,beta)
+                tot_field += control_pos
+                gradients.append(pos_gradient)
+            if neg_budget!=0:
+                control_neg,neg_gradient = self.negative_agent(mag_i,it,neg_budget,beta)
+                tot_field -= control_neg
+                gradients.append(neg_gradient)
                                     
-            tot_field = np.array(self.background_field-control_neg+control_pos)
             self.total_field.append(tot_field)
             mag_ii= self.aitken_method(mag_i,beta,tot_field)
             self.mag_delta_history.append(mag_ii)
-
-            
-            second_dffs=self.second_partial_dffs(mag_ii,tot_field,beta) 
-
-            if (all(np.abs(pos_gradient))<self.iim_tol_fac and all(np.abs(neg_gradient))<self.iim_tol_fac and 
-                all(second_dffs[0]<0) and all(second_dffs[1]<0) ):
-                break
+        
+            if np.all([all(np.abs(gradient)<self.iim_tol_fac) for gradient in gradients]):
+                second_dffs=self.second_partial_dffs(mag_ii,tot_field,beta)
+                if (second_dffs[0]<0).all() and (second_dffs[1]<0).all():
+                    break
+ 
             
             mag_i=mag_ii
+            tot_field = 0 
         if it==self.iim_iter-1:
             print('Failed to converge after {} iterations'.format(self.iim_iter))
             final_mag = mag_ii

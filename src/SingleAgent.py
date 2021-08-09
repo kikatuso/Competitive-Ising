@@ -83,8 +83,7 @@ class mf_ising_system:
             inv = np.linalg.inv(np.identity(self.graph_size)-beta*D*self.adj_matrix)
             susc_matrix = beta*inv*D
             gradient = np.sum(susc_matrix,axis=1).A1
-            #gradient = (1.0 / np.linalg.norm(gradient))*gradient #Normalise
-
+            self.gradient_history.append(gradient)
         return gradient
     
     def sgdm(self,grad,control_field,changes,it):
@@ -108,7 +107,7 @@ class mf_ising_system:
         self.control_field_history=[]
         self.control_field_history.append(control_field)
         self.mag_delta_history =[]
-        
+        self.gradient_history=[]
         mag_i= self.aitken_method(self.init_mag,beta,tot_field)
         
 
