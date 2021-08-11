@@ -1,7 +1,6 @@
 import networkx as nx 
 import numpy as np
 import math
-from numpy.linalg import LinAlgError  
 from tqdm import tqdm
 import numba
 from numba.experimental import jitclass
@@ -79,10 +78,7 @@ def mag_grad(beta,mag,adj_matrix):
     if np.all([isclose(i,j) for i,j in zip(mag,np.ones(mag.shape[0]))]):
         return np.zeros(len(mag))
     else:
-        try:
-            return susc_grad(beta,mag,adj_matrix)
-        except LinAlgError:
-            print(mag)
+        return susc_grad(beta,mag,adj_matrix)
 
 
 
@@ -152,7 +148,7 @@ class mf_ising_system():
         change,ms,vs=adam(mag_i_grad,it,'neg',self.ms_neg,self.vs_neg,self.iim_iter)
         self.ms_neg=ms
         self.vs_neg=vs
-        control_field_update = control_field - change
+        control_field_update = control_field + change
         control_field_new = projection_simplex_sort(control_field_update.T,neg_budget)
         self.control_field_history_neg.append(control_field_new)
         
@@ -175,7 +171,7 @@ class mf_ising_system():
     def init_lists(self):
         self.control_field_history_pos =[]
         self.control_field_history_neg = []
-        self.mag_history = np.zeros((self.iim_iter+1,self.graph_size))
+        self.mag_history = []
         self.pos_gradient_history=np.zeros((self.iim_iter,self.graph_size))
         self.neg_gradient_history=np.zeros((self.iim_iter,self.graph_size))
         
@@ -185,7 +181,7 @@ class mf_ising_system():
         self.vs_neg = np.zeros(self.graph_size,dtype=np.float64)
         
 
-    def MF_IIM(self,pos_budget,neg_budget,beta,init_alloc='random'):
+    def MF_IIM(self,pos_budget,neg_budget,beta,init_alloc='random',progress=True):
  
         if isinstance(init_alloc,(np.ndarray, np.generic)):
             control_field_pos = init_alloc[0,:]
@@ -207,13 +203,14 @@ class mf_ising_system():
         
         
         state = steady_state(self.adj_matrix)
+        self.state=state
 
         tot_field = control_field_pos-control_field_neg
         
         mag_i = state.aitken_method(init_mag,beta,tot_field)
-        self.mag_history[0]=mag_i
+        self.mag_history.append(mag_i)
 
-        for it in tqdm(range(self.iim_iter)):
+        for it in tqdm(range(self.iim_iter)) if progress else range(self.iim_iter):
             
             gradients=[]
             if pos_budget!=0:
@@ -230,12 +227,15 @@ class mf_ising_system():
 
             mag_ii= state.aitken_method(mag_i,beta,tot_field)
             
-            self.mag_history[it+1]=mag_ii
+            self.mag_history.append(mag_ii)
             
-            if np.all([(abs(gradient)<self.iim_tol_fac).all() for gradient in gradients]):
-                second_dffs=self.second_partial_dffs(state,mag_ii,tot_field,beta)
-                if (second_dffs[0]<0).all() and (second_dffs[1]<0).all():
-                    break
+            if (all(np.abs(self.control_field_history_pos[-1]-self.control_field_history_pos[-2])<self.iim_tol_fac) and 
+                all(np.abs(self.control_field_history_neg[-1]-self.control_field_history_neg[-2])<self.iim_tol_fac)):
+                break
+            # if np.all([(abs(gradient)<self.iim_tol_fac).all() for gradient in gradients]):
+            #     second_dffs=self.second_partial_dffs(state,mag_ii,tot_field,beta)
+            #     if (second_dffs[0]<0).all() and (second_dffs[1]<0).all():
+            #         break
             
             mag_i=mag_ii
             tot_field=0.0
@@ -248,5 +248,6 @@ class mf_ising_system():
         
         self.control_field_history_pos = np.array(self.control_field_history_pos)
         self.control_field_history_neg = np.array(self.control_field_history_neg)
+        self.mag_history = np.array(self.mag_history)
 
         return self.control_field_history_pos[-1],self.control_field_history_neg[-1],final_mag
