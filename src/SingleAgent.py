@@ -3,14 +3,6 @@
 import networkx as nx 
 import numpy as np
 import math    
-import torch
-import torch.optim as optim
-from itertools import permutations
-from functools import reduce
-from torch.autograd import grad
-
-
-
 from . import helperfunctions as hf
 
 
@@ -142,20 +134,23 @@ class mf_ising_system:
         return control_field,final_mag
             
 
+from itertools import permutations
+from functools import reduce
+import numdifftools as nd
+
+
 class TrueSolution:
 
-    def __init__(self,graph,init_mag='random'):
+    def __init__(self,graph,beta,init_mag='random',mu=2.0):
         self.adj_matrix = nx.to_numpy_matrix(graph)
         self.graph_size = len(graph.nodes.keys())
-        if init_mag =='aligned':
-            self.init_mag = np.ones(self.graph_size)
-        elif init_mag=='random':
-            self.init_mag=np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
         possible_configs = np.zeros([2**self.graph_size,self.graph_size])
         all_pos,all_neg = np.ones(self.graph_size),(-1)*np.ones(self.graph_size)
         for i,p in enumerate(self.unique_permutations(np.concatenate((all_pos,all_neg)),self.graph_size)):
             possible_configs[i]=p
+        self.mu = mu
         self.possible_configs = possible_configs # possible spin configurations
+        self.beta=beta
 
 
     def unique_permutations(self,iterable, r=None):
@@ -165,66 +160,52 @@ class TrueSolution:
                 previous = p
                 yield p    
 
-    def magnetic_int(self,i,m,h,beta):
-        term = torch.exp(-beta*h[i]*m[i])
-        return term
-
-    def magnetic_int_dev(self,i,m,h,beta):
-        'Derivative of external magnetic field influence on i_th spin with respect to h_i'
-        term = -beta*m[i]*self.magnetic_int(i,m,h,beta)
-        return term
-
-    def magnetic_butI(self,i,m,h,beta):
-        'external magnetic field influence term for all spins but i'
-        iters=[j for j in range(self.graph_size) if j!=i]
-        terms=torch.stack([self.magnetic_int(it,m,h,beta) for it in iters])
-        term = reduce(lambda x, y: x*y,terms)
-        return term
-
-    def magnetic_full(self,m,h,beta):
-        term=torch.stack([self.magnetic_int_dev(i,m,h,beta)*self.magnetic_butI(i,m,h,beta) for i in range(self.graph_size)])
-        return term 
-
-    def intermolar(self,m,beta):
-        'calculates intermolar interaction in the partition function for a single configuration'
-        adj_matrix=torch.from_numpy(self.adj_matrix)
-        exp_term=torch.sum(torch.Tensor([float(m[i]*adj_matrix[i,:]@m) for i in range(self.graph_size)]))/2.0
-        term = torch.exp(-beta*exp_term)
-        return term
-
-
-    def partition_dev(self,h,beta):
-        'Derivative of the partition function with respect to external field. dZ/dH'
-        term=torch.stack([self.intermolar(m,beta)*self.magnetic_full(m,h,beta) for m in self.possible_configs])
-        return torch.sum(term,axis=0)
-
-
-
     def hamiltonian(self,m,h):
-        adj_matrix=torch.from_numpy(self.adj_matrix)
-        m = torch.from_numpy(m)
-        x=torch.sum(torch.Tensor([float(m[i]*adj_matrix[i,:]@m) for i in range(self.graph_size)]))/2.0 + 2*h@m
-        return x  
+        x=np.sum([float(m[i]*self.adj_matrix[i,:]@m) for i in range(self.graph_size)])/2.0 + h@m
+        return -x  
 
 
     def partition_function(self,h,beta):
-        term = torch.stack([torch.exp(-beta*self.hamiltonian(self.possible_configs[i],h)) for i in range(self.possible_configs.shape[0])])
-        return torch.sum(term)
+        term = np.array([np.exp(-beta*self.hamiltonian(self.possible_configs[i],h)) for i in range(self.possible_configs.shape[0])])
+        
+        return np.sum(term)
 
-    # def nth_derivative(self,f, wrt, n):
-    #     for i in range(n):
-    #         grads = -grad(f, wrt, create_graph=True)[0]
-    #         f = grads.sum()
-    #     return grads
-
-
-    def magnetisation(self,h,beta):
-        term = (1/beta)*self.partition_dev(h,beta)* 1.0/(self.partition_function(h,beta))
-        #term =(1/beta)*self.nth_derivative(self.partition_function(h,beta),h,1)* 1.0/(self.partition_function(h,beta))
+    def boltzmann(self,h,beta,j):
+        " j - configuration index"
+        mag_ins = self.possible_configs[j]
+        term = 1/self.partition_function(h,beta) * np.exp(-beta*self.hamiltonian(mag_ins,h))
         return term
 
 
-    def constrained_magnetisation(self,h,l,beta,budget):
-        term = (1/beta)*1/(self.partition_function(h,beta)) * self.partition_dev(h,beta)+l*(torch.sum(h)-budget)
-        return term
+    def magnetisation(self,h):
+        beta = self.beta
+        m = np.zeros(self.graph_size)
+        for ix in range(m.shape[0]):
+            m_i = np.array([self.possible_configs[j,ix]*self.boltzmann(h,beta,j) for j in range(self.possible_configs.shape[0])])
+            m[ix]=np.sum(m_i)
+        return m
 
+    
+    def projection_simplex_sort(v, z=1.0):
+        n_features = v.shape[0]
+        v = np.abs(v)
+        u = np.sort(v)[::-1]
+        cssv = np.cumsum(u) - z
+        ind = np.arange(n_features) + 1
+        cond = u - cssv / ind > 0
+        rho = ind[cond][-1]
+        theta = cssv[cond][-1] / float(rho)
+        w = np.maximum(v - theta, 0)
+        return w
+    
+    def max_mag(self,beta,budget,iters=100,lr=0.5): 
+        per_spin = budget/self.graph_size
+        h = per_spin*np.ones(self.graph_size)
+        for i in range(iters):
+            print(i)
+            grad=nd.Gradient(self.magnetisation)([h])
+            h+=lr*np.sum(grad,axis=1)
+            h = self.projection_simplex_sort(h,budget)
+        return h
+    
+    
