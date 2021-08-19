@@ -8,7 +8,36 @@ from . import helperfunctions as hf
 
 class mf_ising_system:
 
-    def __init__(self,graph,background_field,fixed_point_iter=int(5*1e4),init_mag='aligned',fp_tol_fac=1e-6,
+    """
+    A class to calculate mean field Ising Maximisation Influence problem for a single agent. 
+
+    ...
+
+    Attributes
+    ----------
+    graph : networkx graph
+        undirected graph
+    background_field : numpy.array
+        Background field applied to the system
+    fixed_point_iter : float, optional
+        Max number of iterations used in self-consistency equations (default 5*1e4)
+    fp_tol_fac : float, optional
+        Tolerance factor in stoppping condition for consistency equations (default 1e-6)
+    iim_iter: float, optional
+        Number of gradient ascent iterations (default 1000)
+    step_size: float, optional 
+        Step size for gradient ascent algorithm (default 1.0)
+    iim_tol_fac: float, optional
+        Tolerance factor in stopping condition for gradient ascent algorithm (default 1e-5)
+    optimiser_type: string, optional
+        Type of optimiser used in gradient ascent algorithm. Can choose from sgd (Stochastic Gradient Ascent) or 
+        sgdm (Stochastic Gradient Ascent with Momentum) - default sgd
+    momentum: float, optional
+        Momentum for sgdm optimiser. Ignored if optimiser_type='sgd' (default 0.4). 
+
+    """
+
+    def __init__(self,graph,background_field,fixed_point_iter=int(5*1e4),fp_tol_fac=1e-6,
         iim_iter=1000,step_size=1.0,iim_tol_fac=1e-5,optimiser_type='sgd',momentum=0.4):
         
         self.graph = graph
@@ -22,30 +51,71 @@ class mf_ising_system:
         self.optimiser_type = optimiser_type
         self.momentum = momentum
         self.step_size=step_size
-        if init_mag=='aligned':
-            self.init_mag=np.ones(self.graph_size)
-        elif init_mag=='random':
-            self.init_mag=np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
-        else:
-            self.init_mag = init_mag 
-            
+        self.init_mag=np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
+     
         
     def single_mag(self,i,m,beta,field):
+
+        """
+        Calculates magnetisation for a single node. Subfunction of magnetisation function. 
+
+        Parameters
+        ------------
+        i : int
+            Index of the node in question.
+        m : numpy.array
+            magnetisation array for all nodes.
+        beta: float
+            Interaction strength
+        field: numpy.array
+            Array of agent's control field for each node
+        
+        """
+        
         gamma=1.0
         spin_field = np.dot(self.adj_matrix[i],m) 
         term = math.tanh(beta*(spin_field+field[i]))
         return (1.0-gamma)*m[i] + gamma*term
     
     def magnetisation(self,mag,beta,field):
+
+        """
+        Calculates magnetisation for the whole system 
+
+        Parameters
+        ------------
+        m : numpy.array
+            magnetisation array for all nodes.
+        beta: float
+            Interaction strength
+        field: numpy.array
+            Array of agent's control field for each node
+        
+        """
+
         m_old = mag
         m_new = np.zeros(len(m_old))
         for i in range(self.graph_size):
             m_new[i]=self.single_mag(i,m_old,beta,field)
         return m_new
 
-    def aitken_method(self,mag0,beta,field):      
-        # Numerical Analysis Richard L.Burden 9th Edition, p. 105
+    def aitken_method(self,mag0,beta,field): 
+
+        """
+        Solves self-consistency equation by following Aitken method* for accelerating convergence.
+        * Numerical Analysis Richard L.Burden 9th Edition, p. 105
+
+        Parameters
+        ------------
+        m0 : numpy.array
+            Initial guess of magnetisation for all nodes.
+        beta: float
+            Interaction strength
+        field: numpy.array
+            Array of agent's control field for each node
         
+        """
+
         mag1=self.magnetisation(mag0,beta,field)
         for i in range(self.fixed_point_iter):     
             mag2=self.magnetisation(mag1,beta,field)   
@@ -66,7 +136,18 @@ class mf_ising_system:
         return mag_d
     
     def mag_grad(self,beta,mag):
-        # Mean Field Susceptibility;
+
+        """
+        Calculates gradient of the magnetisation with respect to change in the external control field. Nominally mean field susceptibility.
+
+        Parameters
+        ------------
+        m : numpy.array
+            Magnetisation array for all nodes.
+        beta: float
+            Interaction strength
+
+        """
         
         if all([math.isclose(i,j,abs_tol=1e-5) for i,j in zip(mag,np.ones(len(mag)))]):
             gradient = np.zeros(len(mag))
@@ -78,22 +159,56 @@ class mf_ising_system:
             self.gradient_history.append(gradient)
         return gradient
     
-    def sgdm(self,grad,control_field,changes,it):
-        new_change = self.step_size * grad + self.momentum * changes[it]
+    def sgdm(self,grad,control_field,changes):
+
+        """
+        Stochastic gradient descent with momentum optimiser
+
+        Parameters
+        ------------
+        grad : numpy.array
+            Gradient array for all nodes.
+        control_field: numpy.array
+            Array of agent's control field for each node
+        changes: list
+            Stores list of control field's updates for each iteration
+
+        """
+        new_change = self.step_size * grad + self.momentum * changes[-1]
         control_field_update = control_field + new_change
         changes.append(new_change)
         return control_field_update,changes
     
 
     def MF_IIM(self,field_budget,beta,init_control_field='uniform'):
+
+        """
+        Calculates MF-IIM by following stochastic gradient ascent optimisation.
+
+        Parameters
+        ------------
+        field_budget : float
+            Maximum magnetic field budget to be spent by the agent.
+        beta : float
+            Interaction strength
+        init_control_field : string or numpy.array, optional
+            Either 'uniform' which corresponds to uniform spread of financial budget equaly among nodes. 
+            Alternatively, provide custom numpy.array allocation of your own choice.
+        
+        Outputs
+        -----------
+        control_field : numpy.array
+            Agent's control field allocation that results in maximum magnetisation for the given budget and interaction strength
+        final_mag : numpy.array
+            Final magnetisation of the system. 
+
+        """
               
         if init_control_field=='uniform':
             control_field = (field_budget/self.graph_size)*np.ones(self.graph_size)
         else:
             control_field = init_control_field
-
-        # initial magnetisation as influenced by initial budget spread
-        # note: different from init_mag which denotes initial magnetisation *without* the external field      
+     
         tot_field = np.array(self.background_field+control_field)
 
         self.control_field_history=[]
@@ -112,7 +227,7 @@ class mf_ising_system:
                 if self.optimiser_type=='sgd':
                     control_field_update = (control_field + self.step_size*mag_i_grad)
                 elif self.optimiser_type =='sgdm':
-                    control_field_update,changes = self.sgdm(mag_i_grad,control_field,changes,it)
+                    control_field_update,changes = self.sgdm(mag_i_grad,control_field,changes)
 
                 control_field_new = hf.projection_simplex_sort(control_field_update.T,z=field_budget)
 
@@ -141,19 +256,45 @@ import numdifftools as nd
 
 class TrueSolution:
 
-    def __init__(self,graph,beta,init_mag='random',mu=2.0):
+    """
+    A class to calculate exact Ising Maximisation solution in simple network problems.
+
+    ...
+
+    Attributes
+    ----------
+    graph : networkx graph
+        undirected graph
+    beta : float
+        Interaction strength
+
+    """
+
+    def __init__(self,graph,beta):
         self.adj_matrix = nx.to_numpy_matrix(graph)
         self.graph_size = len(graph.nodes.keys())
         possible_configs = np.zeros([2**self.graph_size,self.graph_size])
         all_pos,all_neg = np.ones(self.graph_size),(-1)*np.ones(self.graph_size)
         for i,p in enumerate(self.unique_permutations(np.concatenate((all_pos,all_neg)),self.graph_size)):
             possible_configs[i]=p
-        self.mu = mu
         self.possible_configs = possible_configs # possible spin configurations
         self.beta=beta
 
 
     def unique_permutations(self,iterable, r=None):
+
+        """
+        Subfunction used in init for the class. Initialises all possible spin configurations for the given graph.
+        ...
+
+        Parameters
+        ----------
+        iterable : numpy.array
+            Array consisting of N +1 spins and N -1 spins where N is size of the graph.
+        r : int
+            Size of the graph. 
+
+        """
         previous = tuple()
         for p in permutations(sorted(iterable), r):
             if p > previous:
@@ -161,23 +302,77 @@ class TrueSolution:
                 yield p    
 
     def hamiltonian(self,m,h):
+
+        """
+        Calculates Hamiltonian function
+        ...
+
+        Parameters
+        ----------
+        m : numpy.array
+            Magnetisation array for all nodes.
+        h : numpy.array
+            Control field allocation of the agent. 
+
+        """
         x=np.sum([float(m[i]*self.adj_matrix[i,:]@m) for i in range(self.graph_size)])/2.0 + h@m
         return -x  
 
 
     def partition_function(self,h,beta):
+
+        """
+        Calculates partition function
+        ...
+
+        Parameters
+        ----------
+        h : numpy.array
+            Control field allocation of the agent. 
+        beta : numpy.array
+            Interaction strength
+
+        """
+
         term = np.array([np.exp(-beta*self.hamiltonian(self.possible_configs[i],h)) for i in range(self.possible_configs.shape[0])])
         
         return np.sum(term)
 
     def boltzmann(self,h,beta,j):
-        " j - configuration index"
+
+        """
+        Calculates Boltzmann distribution
+        ...
+
+        Parameters
+        ----------
+        h : numpy.array
+            Control field allocation of the agent. 
+        beta : numpy.array
+            Interaction strength
+        j : int
+            Possible configuration index"
+
+        """
+
         mag_ins = self.possible_configs[j]
         term = 1/self.partition_function(h,beta) * np.exp(-beta*self.hamiltonian(mag_ins,h))
         return term
 
 
     def magnetisation(self,h):
+
+        """
+        Calculates magnetisation of the nodes by using Boltzmann distribution.
+        ...
+
+        Parameters
+        ----------
+        h : numpy.array
+            Control field allocation of the agent. 
+
+        """
+
         beta = self.beta
         m = np.zeros(self.graph_size)
         for ix in range(m.shape[0]):
@@ -187,6 +382,20 @@ class TrueSolution:
 
     
     def projection_simplex_sort(v, z=1.0):
+
+        """
+        Bounds control field to agent's magnetic field budget. 
+        ...
+
+        Parameters
+        ----------
+        v : numpy.array
+            Control field allocation of the agent. 
+        z : float
+            Magnetic field budget (default 1.0) 
+
+        """
+
         n_features = v.shape[0]
         v = np.abs(v)
         u = np.sort(v)[::-1]
@@ -198,11 +407,27 @@ class TrueSolution:
         w = np.maximum(v - theta, 0)
         return w
     
-    def max_mag(self,beta,budget,iters=100,lr=0.5): 
+    def max_mag(self,budget,iters=100,lr=0.5): 
+
+        """
+        Gradient ascent algorithm for determining
+        control field resulting in maximum magnetisation
+        ...
+
+        Parameters
+        ----------
+        budget : float
+            Magnetic field budget
+        iters : int, optional
+            Number of iteration in gradient ascent optimisation algorithm (default 100).
+        lr : float, optional
+            Learning rate (default 0.5)
+        
+        """
+
         per_spin = budget/self.graph_size
         h = per_spin*np.ones(self.graph_size)
         for i in range(iters):
-            print(i)
             grad=nd.Gradient(self.magnetisation)([h])
             h+=lr*np.sum(grad,axis=1)
             h = self.projection_simplex_sort(h,budget)

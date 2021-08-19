@@ -5,24 +5,56 @@ import numpy as np
 import networkx as nx 
 
 class monte_carlo_simulations:
+
+    """
+    A class to calculate mean field Ising Maximisation Influence problem for a single agent
+    using Markov Chain Monte Carlo sampling. 
+
+    ...
+    Attributes
+    ----------
+    graph : networkx graph
+        undirected graph
+    background_field : numpy.array
+        Background field applied to the system
+    T_burn : int
+        Transient period - number of iterations to be burnt. Default 500.
+    """
+
+
     def __init__(self,graph,background_field,T_burn=500):
         self.graph = graph
         self.graph_size = len(self.graph.nodes())
         self.adj_matrix = nx.to_numpy_matrix(graph)
-        # pos_no = int(positive_ratio*int(self.graph_size))
-        # neg_no = int(self.graph_size) - pos_no
-        # spins = np.concatenate([np.ones(pos_no),(-1)*np.ones(neg_no)])
-        # np.random.shuffle(spins)
-        #self.init_spins = None
         self.background_field = background_field
         self.T_burn = T_burn
         
-    def initialise_spins(self):
-        #spins = np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
+    def initialise_spins(self): 
+        """
+        Subfunction that initialises spins
+
+        """
         spins =np.ones(self.graph_size)
         return spins
 
     def monte_carlo_metropolis(self,control,beta,T):
+
+        """
+        Monte carlo Metropolis algorithm.
+
+        ...
+        Parameters
+        ----------
+        control : numpy.array
+            Control field allocation of the agent.
+        beta: float
+            Interaction strength.
+        T : int
+            Number of iterations (on top of transient period).
+
+        """
+
+
         total_mag_history = []
         mag_old = self.initialise_spins()
         for it in range(T+self.T_burn):
@@ -42,6 +74,24 @@ class monte_carlo_simulations:
         return total_mag_history
 
     def run_MC(self,control,T,MC,beta):
+
+        """
+        Runs independent Markov Chain for Monte Carlo samplings.
+
+        ...
+        Parameters
+        ----------
+        control : numpy.array
+            Control field allocation of the agent.
+        T : int
+            Number of iterations for Monte Carlo sampling (on top of transient period).
+        MC : int
+            Number of Markov Chains.
+        beta: float
+            Interaction strength.
+
+        """
+
         time_averaged_mag = np.zeros(MC)
         for it in range(MC):
             sample = self.monte_carlo_metropolis(control,beta,T)
@@ -53,6 +103,25 @@ class monte_carlo_simulations:
 
     
     def degree(self,budget,T,MC,beta):
+
+        """
+        Calculates magnetisation based on distribution of
+        magnetic field budget proportional to nodes degree.
+
+        ...
+        Parameters
+        ----------
+        budget : float
+            Magnetic field budget for the agent.
+        T : int
+            Number of iterations for Monte Carlo sampling (on top of transient period).
+        MC : int
+            Number of Markov Chains.
+        beta: float
+            Interaction strength.
+
+        """
+
         sum_degree = np.sum([self.graph.degree[node] for node in self.graph.nodes])
         control_field = np.array([(self.graph.degree[node]/sum_degree)*budget for node in self.graph.nodes])
 
@@ -65,6 +134,25 @@ class monte_carlo_simulations:
         return mag_mean,mag_std
 
     def centrality(self,budget,T,MC,beta):
+
+        """
+        Calculates magnetisation based on distribution of 
+        magnetic field budget proportional to nodes centrality measure.
+
+        ...
+        Parameters
+        ----------
+        budget : float
+            Magnetic field budget for the agent.
+        T : int
+            Number of iterations for Monte Carlo sampling (on top of transient period).
+        MC : int
+            Number of Markov Chains.
+        beta: float
+            Interaction strength.
+
+        """
+
         centrality = closeness_centrality(self.graph)
         sum_centrality=sum(centrality.values())
         control_field = np.array([(centrality[node]/sum_centrality)*budget for node in self.graph.nodes])
@@ -78,6 +166,25 @@ class monte_carlo_simulations:
 
 
     def random_set(self,budget,T,MC,beta):
+
+        """
+        Calculates magnetisation based on distribution of magnetic field budget spread 
+        across nodes randomly.
+
+        ...
+        Parameters
+        ----------
+        budget : float
+            Magnetic field budget for the agent.
+        T : int
+            Number of iterations for Monte Carlo sampling (on top of transient period).
+        MC : int
+            Number of Markov Chains.
+        beta: float
+            Interaction strength.
+
+        """
+
         random_arr = [int(100*random.random()) for i in range(self.graph_size)]
         random_dic = {i:k for i,k in zip(self.graph.nodes,random_arr)}
         sum_random = np.sum(random_arr)

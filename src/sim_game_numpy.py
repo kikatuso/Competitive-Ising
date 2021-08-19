@@ -11,7 +11,32 @@ from . import helperfunctions as hf
 
 class mf_ising_system():
 
-    def __init__(self,graph,background_field,fixed_point_iter=int(5*1e4),init_mag='random',fp_tol_fac=1e-5,
+    """
+    A class to calculate mean field Ising Maximisation Influence problem for a single agent. 
+
+    ...
+
+    Attributes
+    ----------
+    graph : networkx graph
+        undirected graph
+    background_field : numpy.array
+        Background field applied to the system
+    fixed_point_iter : float, optional
+        Max number of iterations used in self-consistency equations (default 5*1e4)
+    fp_tol_fac : float, optional
+        Tolerance factor in stoppping condition for consistency equations (default 1e-6)
+    iim_iter: float, optional
+        Number of gradient ascent iterations (default 1000)
+    iim_tol_fac: float, optional
+        Tolerance factor in stopping condition for gradient ascent algorithm (default 1e-5)
+    optimiser_type: string, optional
+        Type of optimiser used in gradient ascent algorithm. Can choose from 'sgd' (Stochastic Gradient Ascent),
+        'sgdm' (Stochastic Gradient Ascent with Momentum), 'adagrad','adadelta' or 'adam'. Default 'adam'.
+
+    """
+
+    def __init__(self,graph,background_field,fixed_point_iter=int(5*1e4),fp_tol_fac=1e-5,
                  iim_iter=5000,iim_tol_fac=1e-4,optimiser_type='adam',**kwargs):
         
         self.adj_matrix = nx.to_numpy_matrix(graph,dtype=np.float64)
@@ -25,11 +50,8 @@ class mf_ising_system():
         for k, v in kwargs.items():
              setattr(self, k, v)
 
-        if init_mag=='random':
-            self.init_mag=np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
-        else:
-            self.init_mag = init_mag 
-
+        self.init_mag=np.array([np.random.choice([-1,1]) for i in range(self.graph_size)])
+      
 
     def lr_1(self,x):
         return np.exp(-x/(0.5*self.iim_iter))
@@ -38,12 +60,44 @@ class mf_ising_system():
         return np.exp(-x/(0.5*self.iim_iter))
    
     def single_mag(self,i,m,beta,field):
+
+        """
+        Calculates magnetisation for a single node. Subfunction of magnetisation function. 
+
+        Parameters
+        ------------
+        i : int
+            Index of the node in question.
+        m : numpy.array
+            magnetisation array for all nodes.
+        beta: float
+            Interaction strength
+        field: numpy.array
+            Array of agent's control field for each node
+        
+        """
+        
         gamma=1.0
         spin_field = np.dot(self.adj_matrix[i],m)
         term = math.tanh(beta*(spin_field+field[i]))
         return (1.0-gamma)*m[i] + gamma*term
 
     def magnetisation(self,mag,beta,field):
+    
+        """
+        Calculates magnetisation for the whole system 
+
+        Parameters
+        ------------
+        m : numpy.array
+            magnetisation array for all nodes.
+        beta: float
+            Interaction strength
+        field: numpy.array
+            Array of agent's control field for each node
+        
+        """
+
         m_old = mag
         m_new = np.zeros(len(m_old))
         for i in range(self.graph_size):
@@ -51,7 +105,22 @@ class mf_ising_system():
         return m_new
 
     def aitken_method(self,mag0,beta,field):      
-        # Numerical Analysis Richard L.Burden 9th Edition, p. 105
+        
+        """
+        Solves self-consistency equation by following Aitken method* for accelerating convergence.
+        * Numerical Analysis Richard L.Burden 9th Edition, p. 105
+
+        Parameters
+        ------------
+        m0 : numpy.array
+            Initial guess of magnetisation for all nodes.
+        beta: float
+            Interaction strength
+        field: numpy.array
+            Array of agent's control field for each node
+        
+        """
+
         
         mag1=self.magnetisation(mag0,beta,field)
         for i in range(self.fixed_point_iter):     
@@ -72,7 +141,18 @@ class mf_ising_system():
         return mag_d
 
     def mag_grad(self,beta,mag):
-        # Mean Field Susceptibility;
+
+        """
+        Calculates gradient of the magnetisation with respect to change in the external control field. Nominally mean field susceptibility.
+
+        Parameters
+        ------------
+        m : numpy.array
+            Magnetisation array for all nodes.
+        beta: float
+            Interaction strength
+
+        """
         
         if all([math.isclose(i,j,abs_tol=1e-5) for i,j in zip(mag,np.ones(len(mag)))]):
             gradient = np.zeros(len(mag))
@@ -84,6 +164,23 @@ class mf_ising_system():
         return gradient
     
     def positive_agent(self,mag_i,it,pos_budget,beta):
+        """
+        Single move by the positive agent. 
+
+        ...
+
+        Parameters
+        ----------
+        mag_i : numpy.array
+            Magnetisation array for all nodes.
+        it : int
+            Iteration of the algorithm.
+        pos_budget : float
+            Magnetic field budget for the positive agent.
+        beta: float
+            Interaction strength
+        """
+
         # maximising positive of magnetisation
         mag_i_grad = self.mag_grad(beta,mag_i)
         self.gradient_history_pos.append(mag_i_grad)
@@ -101,6 +198,24 @@ class mf_ising_system():
         return control_field_new,gradient
     
     def negative_agent(self,mag_i,it,neg_budget,beta):
+
+        """
+        Single move by the negative agent. 
+
+        ...
+
+        Parameters
+        ----------
+        mag_i : numpy.array
+            Magnetisation array for all nodes.
+        it : int
+            Iteration of the algorithm.
+        neg_budget : float
+            Magnetic field budget for the negative agent.
+        beta: float
+            Interaction strength
+   
+        """
         # maximising negative of magnetisation
         mag_i = -1.0*mag_i
         mag_i_grad = -self.mag_grad(beta,mag_i) # minus because product rule: since H_tot = H_pos - H_neg
@@ -119,6 +234,20 @@ class mf_ising_system():
         return control_field_new,gradient
 
     def sgdm(self,grad,typ,it):
+
+        """
+        Stochastic gradient descent with momentum optimiser
+
+        Parameters
+        ------------
+        grad : numpy.array
+            Gradient array for all nodes.
+        typ : string
+            'pos' if calculating for positive agent; 'neg' if calculating for negative agent.
+         it : int
+            Iteration index.
+        """
+
         if typ=='pos':
             step_size=self.lr_1(it)
             name='changes_pos'
@@ -131,6 +260,20 @@ class mf_ising_system():
         return new_change
 
     def adagrad(self,grad,typ,it):
+
+        """
+        Adagrad optimiser.
+
+        Parameters
+        ------------
+        grad : numpy.array
+            Gradient array for all nodes.
+        typ : string
+            'pos' if calculating for positive agent; 'neg' if calculating for negative agent.
+         it : int
+            Iteration index.
+        """
+
         if typ=='pos':
             step_size=self.lr_1(it)
             name='grad_sums_pos'
@@ -145,6 +288,20 @@ class mf_ising_system():
         return change
 
     def adadelta(self,grad,typ,it,ep=1e-4):
+
+        """
+        Adadelta optimiser.
+
+        Parameters
+        ------------
+        grad : numpy.array
+            Gradient array for all nodes.
+        typ : string
+            'pos' if calculating for positive agent; 'neg' if calculating for negative agent.
+         it : int
+            Iteration index.
+        """
+
         if typ=='pos':
             rho=self.rho1
             name1='grad_sums_pos'
@@ -165,6 +322,20 @@ class mf_ising_system():
         return change
     
     def adam(self,grad,typ,it):
+
+        """
+        Adam optimiser.
+
+        Parameters
+        ------------
+        grad : numpy.array
+            Gradient array for all nodes.
+        typ : string
+            'pos' if calculating for positive agent; 'neg' if calculating for negative agent.
+         it : int
+            Iteration index.
+        """
+
         if typ=='pos':
             lr=self.lr_1(it)
             name1='ms_pos'
@@ -189,9 +360,26 @@ class mf_ising_system():
         return change
     
     def second_partial_dffs(self,mag_ii,tot_field,beta,a=1e-5):
-        ' estimating 2nd partial derivative with respect to each agents external field' 
-        
-        ' gradient for negative '
+
+        """
+        Calculates 2nd gradients of magnetisation with respect to each agents' control field.
+        Calculated using central difference formula. 
+
+        ...
+
+        Parameters
+        ----------
+
+        mag_ii : numpy.array
+            Magnetisation array for all nodes.
+        tot_field : numpy.array
+            Total net magnetic field experienced by each node. 
+        beta: float
+            Interaction strength
+        a : float, optional
+            Used in central difference formula. Specifies magnitude of change of control field. 
+   
+        """
         update = a*np.ones(self.graph_size)
         upper_change=tot_field+update
         mag_plus= -self.aitken_method(mag_ii,beta,upper_change)
@@ -217,6 +405,10 @@ class mf_ising_system():
         return np.array([curv_player_pos,curv_player_neg])
 
     def init_optimiser(self):
+        """
+        Initialise lists specific to optimiser_type.
+
+        """
         if self.optimiser_type=='sgdm':
             self.changes_pos = [np.zeros(self.graph_size)]
             self.changes_neg = [np.zeros(self.graph_size)]
@@ -232,6 +424,36 @@ class mf_ising_system():
             self.vs_neg = np.zeros(self.graph_size)
 
     def MF_IIM(self,pos_budget,neg_budget,beta,init_alloc='random',progress=True):
+
+        """
+        Calculates competitive MF-IIM by following stochastic gradient ascent optimisation with
+        Adam optimiser.
+
+        Parameters
+        ------------
+        pos_budget : float
+            Maximum magnetic field budget to be spent by the positive agent.
+        neg_budget : float
+            Maximum magnetic field budget to be spent by the negative agent.
+        beta : float
+            Interaction strength
+        init_alloc : string or numpy.array, optional
+            Either 'uniform' which corresponds to uniform spread of financial budget equaly among nodes.
+            'random' corresponds to random initialisations. Alternatively, provide custom numpy.array 
+            allocation of your own choice. Default 'random'.
+        progress : boolean
+            If True shows progress bar; False otherwise. 
+
+        Outputs
+        -----------
+        control_field_pos : numpy.array
+            Positive agent's control field allocation that results in the equilibrium.
+        control_field_neg : numpy.array
+            Negative agent's control field allocation that results in the equilibrium.
+        final_mag : numpy.array
+            Final magnetisation of the system. 
+
+        """
 
         if isinstance(init_alloc,(np.ndarray, np.generic)):
             control_field_pos = init_alloc[0,:]

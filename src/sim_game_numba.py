@@ -20,6 +20,24 @@ steadyspec = [
 
 @jitclass(steadyspec)
 class steady_state(object):
+
+    """
+    A class to calculate steady state of magnetisation. 
+
+    ...
+
+    Attributes
+    ----------
+    adj_matrix : numpy.array
+        Adjacency matrix of the graph
+    fixed_point_iter : float, optional
+        Max number of iterations used in self-consistency equations (default 1e5)
+    fp_tol_fac : float, optional
+        Tolerance factor in stoppping condition for consistency equations (default 1e-6)
+    
+    """
+
+
     def __init__(self,adj_matrix,fixed_point_iter=10000,fp_tol_fac=1e-6):
 
         self.adj_matrix = adj_matrix
@@ -29,19 +47,67 @@ class steady_state(object):
 
 
     def single_mag(self,i,m,beta,field):
+
+        """
+        Calculates magnetisation for a single node. Subfunction of magnetisation function. 
+
+        Parameters
+        ------------
+        i : int
+            Index of the node in question.
+        m : numpy.array
+            magnetisation array for all nodes.
+        beta: float
+            Interaction strength
+        field: numpy.array
+            Array of agent's control field for each node
+
+        """
+
         gamma=1.0
         spin_field = self.adj_matrix[i].dot(m)
         term = math.tanh(beta*(spin_field+field[i]))
         return (1.0-gamma)*m[i] + gamma*term
 
     def magnetisation(self,mag,beta,field):
+    
+        """
+        Calculates magnetisation for the whole system 
+
+        Parameters
+        ------------
+        m : numpy.array
+            magnetisation array for all nodes.
+        beta: float
+            Interaction strength
+        field: numpy.array
+            Array of agent's control field for each node
+        
+        """
+
         m_old = mag
         m_new = np.zeros(len(m_old))
         for i in range(self.graph_size):
             m_new[i]=self.single_mag(i,m_old,beta,field)
         return m_new
 
-    def aitken_method(self,mag0,beta,field):      
+    def aitken_method(self,mag0,beta,field):    
+
+        """
+        Solves self-consistency equation by following Aitken method* for accelerating convergence.
+        * Numerical Analysis Richard L.Burden 9th Edition, p. 105
+
+        Parameters
+        ------------
+        m0 : numpy.array
+            Initial guess of magnetisation for all nodes.
+        beta: float
+            Interaction strength
+        field: numpy.array
+            Array of agent's control field for each node
+
+        """
+
         mag1=self.magnetisation(mag0,beta,field)
         for i in range(self.fixed_point_iter):     
             mag2=self.magnetisation(mag1,beta,field)   
@@ -66,6 +132,20 @@ def isclose(a,b):
 
 @jit(nopython=True) 
 def susc_grad(beta,mag,adj_matrix):
+
+    """
+    Calculates mean field susceptibility.
+
+    Parameters
+    ------------
+    beta: float
+        Interaction strength.
+    mag : numpy.array
+        Magnetisation array for all nodes.
+    adj_matrix : numpy.array
+        Adjacency matrix of the network.
+    """
+
     D=np.identity(mag.shape[0])*np.array([(1-i**2) for i in mag]) 
     inv = np.linalg.inv(np.identity(mag.shape[0])-beta*D.dot(adj_matrix))
     susc_matrix = beta*inv.dot(D)
@@ -74,6 +154,22 @@ def susc_grad(beta,mag,adj_matrix):
     return gradient
 
 def mag_grad(beta,mag,adj_matrix):
+
+
+    """
+    Calculates gradient of the magnetisation with respect to change in the external control field. Nominally mean field susceptibility.
+
+    Parameters
+    ------------
+    beta : float
+        Interaction strength.
+    mag : numpy.array
+        Magnetisation array for all nodes.
+    adj_matrix : numpy.array
+        Adjacency matrix of the network.
+
+    """
+
     if np.all([isclose(i,j) for i,j in zip(mag,np.ones(mag.shape[0]))]):
         return np.zeros(len(mag))
     else:
@@ -83,6 +179,20 @@ def mag_grad(beta,mag,adj_matrix):
 
 @jit(nopython=True)
 def projection_simplex_sort(v, z):
+
+    """
+    Bounds control field to agent's magnetic field budget. 
+    ...
+
+    Parameters
+    ----------
+    v : numpy.array
+        Control field allocation of the agent. 
+    z : float
+        Magnetic field budget.
+
+    """
+
     n_features = v.shape[0]
     v = np.abs(v)
     u = np.sort(v)[::-1]
@@ -105,6 +215,33 @@ def lr_2(x,iim_iter=5000):
 
 @jit(nopython=True) 
 def adam(grad,it,typ,ms,vs,iim_iter,beta1=0.9,beta2=0.999,eps=0.1):
+
+    """
+        Adam optimiser.
+
+        Parameters
+        ------------
+        grad : numpy.array
+            Gradient array for all nodes.
+        it : int
+            Iteration index.
+        typ : string
+            'pos' if calculating for positive agent; 'neg' if calculating for negative agent.
+        ms : numpy.array
+            Momentum array with linear gradients
+        vs : numpy.array
+            Momentum array with squared gradients
+        iim_iter : int
+            Max number of iteration in optimisation algorithm.
+        beta1 : float
+            Default 0.9
+        beta2 : float
+            Default 0.999
+        eps : float
+            Default 0.1
+
+    """
+
     if typ=='pos':
         lr=lr_1(it)
     elif typ=='neg':
@@ -119,6 +256,25 @@ def adam(grad,it,typ,ms,vs,iim_iter,beta1=0.9,beta2=0.999,eps=0.1):
     return change,ms,vs
 
 class mf_ising_system():
+
+
+    """
+    A class to calculate mean field Ising Maximisation Influence problem for a two agents. 
+
+    ...
+
+    Attributes
+    ----------
+    graph : networkx graph
+        undirected graph
+    background_field : numpy.array
+        Background field applied to the system
+    iim_iter: float, optional
+        Number of gradient ascent iterations (default 1000)
+    iim_tol_fac: float, optional
+        Tolerance factor in stopping condition for gradient ascent algorithm (default 1e-3)
+    """
+
     def __init__(self,graph,background_field,iim_iter=10000,iim_tol_fac=1e-3):
 
         self.graph=graph
@@ -130,6 +286,25 @@ class mf_ising_system():
         
 
     def positive_agent(self,mag_i,it,pos_budget,beta):
+
+
+        """
+        Single move by the positive agent. 
+
+        ...
+
+        Parameters
+        ----------
+        mag_i : numpy.array
+            Magnetisation array for all nodes.
+        it : int
+            Iteration of the algorithm.
+        pos_budget : float
+            Magnetic field budget for the positive agent.
+        beta: float
+            Interaction strength
+        """
+
         mag_i_grad = mag_grad(beta,mag_i,self.adj_matrix)
         control_field = self.control_field_history_pos[-1]
         change,ms,vs = adam(mag_i_grad,it,'pos',self.ms_pos,self.vs_pos,self.iim_iter)
@@ -141,6 +316,25 @@ class mf_ising_system():
         return control_field_new,mag_i_grad
     
     def negative_agent(self,mag_i,it,neg_budget,beta):
+
+        """
+        Single move by the negative agent. 
+
+        ...
+
+        Parameters
+        ----------
+        mag_i : numpy.array
+            Magnetisation array for all nodes.
+        it : int
+            Iteration of the algorithm.
+        neg_budget : float
+            Magnetic field budget for the negative agent.
+        beta: float
+            Interaction strength
+   
+        """
+
         mag_i = -1.0*mag_i
         mag_i_grad = -mag_grad(beta,mag_i,self.adj_matrix)
         control_field = self.control_field_history_neg[-1]
@@ -154,6 +348,29 @@ class mf_ising_system():
         return control_field_new,mag_i_grad
         
     def second_partial_dffs(self,state,mag_ii,tot_field,beta,a=1e-5):
+
+        """
+        Calculates 2nd gradients of magnetisation with respect to each agents' control field.
+        Calculated using central difference formula. 
+
+        ...
+
+        Parameters
+        ----------
+
+        state : class instance
+            steady_state class instance
+        mag_ii : numpy.array
+            Magnetisation array for all nodes.
+        tot_field : numpy.array
+            Total net magnetic field experienced by each node. 
+        beta: float
+            Interaction strength
+        a : float, optional
+            Used in central difference formula. Specifies magnitude of change of control field. 
+   
+        """
+
         update = a*np.ones(self.graph_size)
         upper_change=tot_field+update
         mag_plus= -state.aitken_method(mag_ii,beta,upper_change)
@@ -168,6 +385,10 @@ class mf_ising_system():
         return np.array([curv_player_pos,curv_player_neg])
     
     def init_lists(self):
+        """
+        Initialises lists for storing variables.
+
+        """
         self.control_field_history_pos =[]
         self.control_field_history_neg = []
         self.mag_history = []
@@ -181,6 +402,35 @@ class mf_ising_system():
         
 
     def MF_IIM(self,pos_budget,neg_budget,beta,init_alloc='random',progress=True):
+        """
+        Calculates competitive MF-IIM by following stochastic gradient ascent optimisation with
+        Adam optimiser.
+
+        Parameters
+        ------------
+        pos_budget : float
+            Maximum magnetic field budget to be spent by the positive agent.
+        neg_budget : float
+            Maximum magnetic field budget to be spent by the negative agent.
+        beta : float
+            Interaction strength
+        init_alloc : string or numpy.array, optional
+            Either 'uniform' which corresponds to uniform spread of financial budget equaly among nodes.
+            'random' corresponds to random initialisations. Alternatively, provide custom numpy.array 
+            allocation of your own choice. Default 'random'.
+        progress : boolean
+            If True shows progress bar; False otherwise. 
+
+        Outputs
+        -----------
+        control_field_pos : numpy.array
+            Positive agent's control field allocation that results in the equilibrium.
+        control_field_neg : numpy.array
+            Negative agent's control field allocation that results in the equilibrium.
+        final_mag : numpy.array
+            Final magnetisation of the system. 
+
+        """
  
         if isinstance(init_alloc,(np.ndarray, np.generic)):
             control_field_pos = init_alloc[0,:]
