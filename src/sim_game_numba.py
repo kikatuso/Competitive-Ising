@@ -6,6 +6,7 @@ import numba
 from numba.experimental import jitclass
 from numba import jit
 
+import time
 
 
 
@@ -36,8 +37,6 @@ class steady_state(object):
         Tolerance factor in stoppping condition for consistency equations (default 1e-6)
     
     """
-
-
     def __init__(self,adj_matrix,fixed_point_iter=10000,fp_tol_fac=1e-6):
 
         self.adj_matrix = adj_matrix
@@ -91,8 +90,8 @@ class steady_state(object):
             m_new[i]=self.single_mag(i,m_old,beta,field)
         return m_new
 
-    def aitken_method(self,mag0,beta,field):    
-
+    def aitken_method(self,mag0,beta,field):
+    
         """
         Solves self-consistency equation by following Aitken method* for accelerating convergence.
         * Numerical Analysis Richard L.Burden 9th Edition, p. 105
@@ -107,7 +106,7 @@ class steady_state(object):
             Array of agent's control field for each node
 
         """
-
+  
         mag1=self.magnetisation(mag0,beta,field)
         for i in range(self.fixed_point_iter):     
             mag2=self.magnetisation(mag1,beta,field)   
@@ -145,7 +144,6 @@ def susc_grad(beta,mag,adj_matrix):
     adj_matrix : numpy.array
         Adjacency matrix of the network.
     """
-
     D=np.identity(mag.shape[0])*np.array([(1-i**2) for i in mag]) 
     inv = np.linalg.inv(np.identity(mag.shape[0])-beta*D.dot(adj_matrix))
     susc_matrix = beta*inv.dot(D)
@@ -154,7 +152,6 @@ def susc_grad(beta,mag,adj_matrix):
     return gradient
 
 def mag_grad(beta,mag,adj_matrix):
-
 
     """
     Calculates gradient of the magnetisation with respect to change in the external control field. Nominally mean field susceptibility.
@@ -257,7 +254,6 @@ def adam(grad,it,typ,ms,vs,iim_iter,beta1=0.9,beta2=0.999,eps=0.1):
 
 class mf_ising_system():
 
-
     """
     A class to calculate mean field Ising Maximisation Influence problem for a two agents. 
 
@@ -287,7 +283,6 @@ class mf_ising_system():
 
     def positive_agent(self,mag_i,it,pos_budget,beta):
 
-
         """
         Single move by the positive agent. 
 
@@ -316,7 +311,7 @@ class mf_ising_system():
         return control_field_new,mag_i_grad
     
     def negative_agent(self,mag_i,it,neg_budget,beta):
-
+    
         """
         Single move by the negative agent. 
 
@@ -385,6 +380,7 @@ class mf_ising_system():
         return np.array([curv_player_pos,curv_player_neg])
     
     def init_lists(self):
+
         """
         Initialises lists for storing variables.
 
@@ -401,7 +397,7 @@ class mf_ising_system():
         self.vs_neg = np.zeros(self.graph_size,dtype=np.float64)
         
 
-    def MF_IIM(self,pos_budget,neg_budget,beta,init_alloc='random',progress=True):
+    def MF_IIM(self,pos_budget,neg_budget,beta,init_alloc='random',progress=True,max_time=3.0):
         """
         Calculates competitive MF-IIM by following stochastic gradient ascent optimisation with
         Adam optimiser.
@@ -458,7 +454,8 @@ class mf_ising_system():
         
         mag_i = state.aitken_method(init_mag,beta,tot_field)
         self.mag_history.append(mag_i)
-
+        start_time = time.time()
+        self.converged=False
         for it in tqdm(range(self.iim_iter)) if progress else range(self.iim_iter):
             
             gradients=[]
@@ -477,15 +474,19 @@ class mf_ising_system():
             mag_ii= state.aitken_method(mag_i,beta,tot_field)
             
             self.mag_history.append(mag_ii)
-            
+            time_now = time.time()
+            elapsed_time = (time_now - start_time)/60.0
             if (all(np.abs(self.control_field_history_pos[-1]-self.control_field_history_pos[-2])<self.iim_tol_fac) and 
                 all(np.abs(self.control_field_history_neg[-1]-self.control_field_history_neg[-2])<self.iim_tol_fac)):
-                    break
-            # if np.all([(abs(gradient)<self.iim_tol_fac).all() for gradient in gradients]):
-            #     second_dffs=self.second_partial_dffs(state,mag_ii,tot_field,beta)
-            #     if (second_dffs[0]<0).all() and (second_dffs[1]<0).all():
-            #         break
-            
+                self.converged=True
+                break
+#             if np.all([(abs(gradient)<self.iim_tol_fac).all() for gradient in gradients]):
+#                 second_dffs=self.second_partial_dffs(state,mag_ii,tot_field,beta)
+#                 if (second_dffs[0]<0).all() and (second_dffs[1]<0).all():
+#                     break
+            if elapsed_time>max_time:
+                print('Timeout')
+                break
             mag_i=mag_ii
             tot_field=0.0
         if it==self.iim_iter-1:
