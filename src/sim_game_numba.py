@@ -336,7 +336,7 @@ class mf_ising_system():
         change,ms,vs=adam(mag_i_grad,it,'neg',self.ms_neg,self.vs_neg,self.iim_iter)
         self.ms_neg=ms
         self.vs_neg=vs
-        control_field_update = control_field + change
+        control_field_update = control_field - change
         control_field_new = projection_simplex_sort(control_field_update.T,neg_budget)
         self.control_field_history_neg.append(control_field_new)
         

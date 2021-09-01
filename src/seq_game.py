@@ -336,7 +336,8 @@ class mf_ising_system():
             Interaction strength
    
         """
-        mag_i_grad = mag_grad(beta,mag_i,self.adj_matrix)
+        mag_i = -1.0*mag_i
+        mag_i_grad = -mag_grad(beta,mag_i,self.adj_matrix)
         control_field = self.control_field_history_neg[-1]
         change,ms,vs=adam(mag_i_grad,it,'neg',self.ms_neg,self.vs_neg,self.iim_iter)
         self.ms_neg=ms
